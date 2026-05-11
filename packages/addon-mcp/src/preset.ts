@@ -7,9 +7,10 @@ import { getAddonVitestConstants } from './tools/run-story-tests.ts';
 import { isAddonA11yEnabled } from './utils/is-addon-a11y-enabled.ts';
 import htmlTemplate from './template.html';
 import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { CompositionAuth, extractBearerToken, type ComposedRef } from './auth/index.ts';
 import { logger } from 'storybook/internal/node-logger';
-import type { Source } from '@storybook/mcp';
+import { findDeclarationForTag, type CustomElementsManifest, type Source } from '@storybook/mcp';
 
 export const previewAnnotations: PresetPropertyFn<'previewAnnotations'> = async (
 	existingAnnotations = [],
@@ -189,6 +190,83 @@ export const features: PresetPropertyFn<'features'> = async (existingFeatures) =
 		componentsManifest: true,
 	};
 };
+
+type ManifestEntry = {
+	id: string;
+	title: string;
+	name: string;
+	importPath: string;
+	type: string;
+};
+
+/**
+ * Generates a component manifest from a Custom Elements Manifest (custom-elements.json).
+ * Called by Storybook during build to populate manifests/components.json for web component projects.
+ * Passthrough when no custom-elements.json is found, so non-web-component projects are unaffected.
+ */
+export const experimental_manifests = async (
+	existingManifests: unknown,
+	{ manifestEntries = [] }: { manifestEntries?: ManifestEntry[] } = {},
+): Promise<Record<string, unknown>> => {
+	let cem: CustomElementsManifest | undefined;
+	try {
+		const raw = await readFile(path.join(process.cwd(), 'custom-elements.json'), 'utf-8');
+		cem = JSON.parse(raw) as CustomElementsManifest;
+	} catch {
+		return existingManifests != null && typeof existingManifests === 'object'
+			? (existingManifests as Record<string, unknown>)
+			: {};
+	}
+
+	const byTitle = new Map<string, ManifestEntry[]>();
+	for (const entry of manifestEntries) {
+		if (entry.type !== 'story') continue;
+		const group = byTitle.get(entry.title) ?? [];
+		group.push(entry);
+		byTitle.set(entry.title, group);
+	}
+
+	const components: Record<string, unknown> = {};
+	for (const [title, entries] of byTitle) {
+		const first = entries[0]!; // safe: entries only added when non-empty above
+		const componentId = first.id.replace(/--[^-]+$/, '');
+		const name = title.split('/').pop() ?? title;
+		const tagName = deriveTagName(title);
+		const cemDecl = findDeclarationForTag(cem, tagName);
+
+		components[componentId] = {
+			id: componentId,
+			name,
+			path: first.importPath,
+			stories: entries.map((e) => ({ id: e.id, name: e.name })),
+			...(cemDecl ? { customElementsManifest: cemDecl } : {}),
+		};
+	}
+
+	return {
+		...(existingManifests != null && typeof existingManifests === 'object'
+			? (existingManifests as Record<string, unknown>)
+			: {}),
+		components: { v: 1, components },
+	};
+};
+
+/**
+ * Derives a custom element tag name from a Storybook story title segment.
+ * Handles both space-separated ("My Button" → "my-button") and
+ * CamelCase ("MyButton" → "my-button") naming conventions.
+ * Returns undefined for non-hyphenated names (not a custom element).
+ */
+function deriveTagName(title: string): string | undefined {
+	const segment = title.split('/').pop() ?? '';
+	const kebab = segment
+		.replace(/\s+/g, '-')
+		.replace(/([a-z])([A-Z])/g, '$1-$2')
+		.toLowerCase()
+		.replace(/^-/, '')
+		.replace(/-+/g, '-');
+	return kebab.includes('-') ? kebab : undefined;
+}
 
 /**
  * Get composed Storybook refs from Storybook config.
