@@ -316,6 +316,7 @@ export function formatComponentManifest(componentManifest: ComponentManifest): s
 		parts.push('');
 
 		const storiesWithSnippets = componentManifest.stories.filter((s) => s.snippet);
+		const storiesWithoutSnippets = componentManifest.stories.filter((s) => !s.snippet);
 
 		// Check if component has props - if not, show all stories fully
 		const hasProps = parsedDocgen && Object.keys(parsedDocgen.props).length > 0;
@@ -323,7 +324,10 @@ export function formatComponentManifest(componentManifest: ComponentManifest): s
 		const storiesToShow = hasProps
 			? storiesWithSnippets.slice(0, MAX_STORIES_TO_SHOW)
 			: storiesWithSnippets;
-		const remainingStories = hasProps ? storiesWithSnippets.slice(MAX_STORIES_TO_SHOW) : [];
+		const remainingStories = [
+			...(hasProps ? storiesWithSnippets.slice(MAX_STORIES_TO_SHOW) : []),
+			...storiesWithoutSnippets,
+		];
 
 		// Show first X stories in full detail (or all if no props)
 		for (const story of storiesToShow) {
