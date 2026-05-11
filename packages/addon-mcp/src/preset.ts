@@ -229,7 +229,7 @@ export const experimental_manifests = async (
 	const components: Record<string, unknown> = {};
 	for (const [title, entries] of byTitle) {
 		const first = entries[0]!; // safe: entries only added when non-empty above
-		const componentId = first.id.replace(/--[^-]+$/, '');
+		const componentId = first.id.replace(/--.+$/, '');
 		const name = title.split('/').pop() ?? title;
 		const tagName = deriveTagName(title);
 		const cemDecl = findDeclarationForTag(cem, tagName);
