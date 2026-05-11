@@ -12,6 +12,10 @@ import {
 	parseReactDocgenTypescript,
 	type ParsedDocgen,
 } from '../parse-react-docgen.ts';
+import {
+	parseCemDeclaration,
+	type ParsedCem,
+} from '../parse-custom-elements-manifest.ts';
 import { dedent } from '../dedent.ts';
 import { extractDocsSummary, MAX_SUMMARY_LENGTH } from './extract-docs-summary.ts';
 
@@ -69,15 +73,16 @@ function extractSummary(
 }
 
 /**
- * Extract parsed docgen from a component manifest, preferring reactDocgen over
- * reactDocgenTypescript over reactComponentMeta.
+ * Extract parsed docgen from a component manifest. Tries React sources first for
+ * backwards compatibility, then falls back to a Custom Elements Manifest declaration
+ * for web component setups.
  */
 function getParsedDocgen(
 	componentManifest: Pick<
 		ComponentManifest | SubcomponentManifest,
-		'reactDocgen' | 'reactDocgenTypescript' | 'reactComponentMeta'
+		'reactDocgen' | 'reactDocgenTypescript' | 'reactComponentMeta' | 'customElementsManifest'
 	>,
-): ParsedDocgen | undefined {
+): ParsedDocgen | ParsedCem | undefined {
 	if (componentManifest.reactDocgen) {
 		return parseReactDocgen(componentManifest.reactDocgen);
 	}
@@ -87,7 +92,83 @@ function getParsedDocgen(
 	if (componentManifest.reactComponentMeta) {
 		return parseReactComponentMeta(componentManifest.reactComponentMeta);
 	}
+	if (componentManifest.customElementsManifest) {
+		return parseCemDeclaration(componentManifest.customElementsManifest);
+	}
 	return undefined;
+}
+
+function isParsedCem(parsed: ParsedDocgen): parsed is ParsedCem {
+	return 'attributes' in parsed || 'events' in parsed;
+}
+
+function formatWebComponentSections(parsed: ParsedCem): string[] {
+	const parts: string[] = [];
+
+	const attrEntries = Object.entries(parsed.attributes);
+	if (attrEntries.length > 0) {
+		parts.push('## HTML Attributes');
+		parts.push('');
+		parts.push('```');
+		for (const [name, attr] of attrEntries) {
+			if (attr.description) {
+				parts.push(`// ${attr.description}`);
+			}
+			const typePart = attr.type ? `: ${attr.type}` : '';
+			const defaultPart = attr.defaultValue !== undefined ? ` = ${attr.defaultValue}` : '';
+			parts.push(`${name}${typePart}${defaultPart};`);
+		}
+		parts.push('```');
+		parts.push('');
+	}
+
+	const eventEntries = Object.entries(parsed.events);
+	if (eventEntries.length > 0) {
+		parts.push('## Events');
+		parts.push('');
+		for (const [name, ev] of eventEntries) {
+			const typePart = ev.type ? ` (${ev.type})` : '';
+			const descPart = ev.description ? ` — ${ev.description}` : '';
+			parts.push(`- \`${name}\`${typePart}${descPart}`);
+		}
+		parts.push('');
+	}
+
+	const slotEntries = Object.entries(parsed.slots);
+	if (slotEntries.length > 0) {
+		parts.push('## Slots');
+		parts.push('');
+		for (const [name, slot] of slotEntries) {
+			const descPart = slot.description ? ` — ${slot.description}` : '';
+			parts.push(`- \`${name}\`${descPart}`);
+		}
+		parts.push('');
+	}
+
+	const cssPropEntries = Object.entries(parsed.cssProperties);
+	if (cssPropEntries.length > 0) {
+		parts.push('## CSS Custom Properties');
+		parts.push('');
+		for (const [name, cp] of cssPropEntries) {
+			const typePart = cp.type ? ` (${cp.type})` : '';
+			const descPart = cp.description ? ` — ${cp.description}` : '';
+			parts.push(`- \`${name}\`${typePart}${descPart}`);
+		}
+		parts.push('');
+	}
+
+	const cssPartEntries = Object.entries(parsed.cssParts);
+	if (cssPartEntries.length > 0) {
+		parts.push('## CSS Parts');
+		parts.push('');
+		for (const [name, part] of cssPartEntries) {
+			const descPart = part.description ? ` — ${part.description}` : '';
+			parts.push(`- \`${name}\`${descPart}`);
+		}
+		parts.push('');
+	}
+
+	return parts;
 }
 
 /**
@@ -282,6 +363,10 @@ export function formatComponentManifest(componentManifest: ComponentManifest): s
 	}
 
 	parts.push(...formatPropsSection(parsedDocgen));
+
+	if (parsedDocgen && isParsedCem(parsedDocgen)) {
+		parts.push(...formatWebComponentSections(parsedDocgen));
+	}
 
 	// Attached docs section
 	if (componentManifest.docs && Object.keys(componentManifest.docs).length > 0) {
