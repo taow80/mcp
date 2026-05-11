@@ -25,6 +25,7 @@ export const experimental_devServer: PresetPropertyFn<'experimental_devServer'> 
 	// ValiError: Invalid type: Expected boolean but received "false"
 	const addonOptions = v.parse(AddonOptions, {
 		toolsets: 'toolsets' in options ? options.toolsets : {},
+		manifestProvider: 'manifestProvider' in options ? options.manifestProvider : undefined,
 	});
 
 	const origin = `http://localhost:${options.port}`;
@@ -52,6 +53,19 @@ export const experimental_devServer: PresetPropertyFn<'experimental_devServer'> 
 
 		// Create manifest provider that handles multi-source
 		manifestProvider = compositionAuth.createManifestProvider(origin);
+	}
+
+	// Allow user to override the manifest provider (e.g., for web component / composite setups)
+	if (addonOptions.manifestProvider) {
+		manifestProvider = addonOptions.manifestProvider;
+		// When using a custom provider, include all refs as sources regardless of auth check.
+		// The custom provider is responsible for resolving URLs (including proxy rewrites).
+		if (refs.length > 0) {
+			sources = [
+				{ id: 'local', url: origin, title: 'Local' },
+				...refs.map((ref) => ({ id: ref.id, url: ref.url, title: ref.title })),
+			];
+		}
 	}
 
 	// Serve .well-known/oauth-protected-resource for MCP auth
@@ -102,7 +116,9 @@ export const experimental_devServer: PresetPropertyFn<'experimental_devServer'> 
 	const a11yEnabled = await isAddonA11yEnabled(options);
 
 	const isDevEnabled = addonOptions.toolsets?.dev ?? true;
-	const isDocsEnabled = manifestStatus.available && (addonOptions.toolsets?.docs ?? true);
+	const isDocsEnabled =
+		(manifestStatus.available || !!addonOptions.manifestProvider) &&
+		(addonOptions.toolsets?.docs ?? true);
 	const isTestEnabled = !!addonVitestConstants && (addonOptions.toolsets?.test ?? true);
 
 	app!.get('/mcp', (req, res) => {
