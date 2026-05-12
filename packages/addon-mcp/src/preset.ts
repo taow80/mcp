@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { CompositionAuth, extractBearerToken, type ComposedRef } from './auth/index.ts';
 import { logger } from 'storybook/internal/node-logger';
 import { findDeclarationForTag, type CustomElementsManifest, type Source } from '@storybook/mcp';
+import { readCsf } from 'storybook/internal/csf-tools';
 
 export const previewAnnotations: PresetPropertyFn<'previewAnnotations'> = async (
 	existingAnnotations = [],
@@ -197,7 +198,35 @@ type ManifestEntry = {
 	name: string;
 	importPath: string;
 	type: string;
+	tags?: string[];
 };
+
+/**
+ * Reads a story file and returns a map of story display name → source snippet.
+ * Uses the CSF parser's AST node positions to slice the raw source text, which works
+ * for any story format including lit html tagged-template stories.
+ * Keys are the story's display name (e.g. "Form Associated") to match manifest entry names.
+ */
+async function extractStorySnippets(filePath: string): Promise<Record<string, string>> {
+	try {
+		const source = await readFile(filePath, 'utf-8');
+		const csf = await readCsf(filePath, { makeTitle: () => 'Component' });
+		csf.parse();
+		const storyStatements = (
+			csf as unknown as { _storyStatements: Record<string, { start: number; end: number }> }
+		)._storyStatements;
+		const storyMeta = (csf as unknown as { _stories: Record<string, { name: string }> })._stories;
+		const snippets: Record<string, string> = {};
+		for (const [exportKey, node] of Object.entries(storyStatements)) {
+			// Use display name (from _stories) as key so it matches manifest entry.name
+			const displayName = storyMeta[exportKey]?.name ?? exportKey;
+			snippets[displayName] = source.slice(node.start, node.end);
+		}
+		return snippets;
+	} catch {
+		return {};
+	}
+}
 
 /**
  * Generates a component manifest from a Custom Elements Manifest (custom-elements.json).
@@ -234,11 +263,20 @@ export const experimental_manifests = async (
 		const tagName = deriveTagName(title);
 		const cemDecl = findDeclarationForTag(cem, tagName);
 
+		const snippets = await extractStorySnippets(
+			path.join(process.cwd(), first.importPath),
+		);
+
 		components[componentId] = {
 			id: componentId,
 			name,
 			path: first.importPath,
-			stories: entries.map((e) => ({ id: e.id, name: e.name })),
+			stories: entries.map((e) => ({
+				id: e.id,
+				name: e.name,
+				...(e.tags?.length ? { tags: e.tags } : {}),
+				...(snippets[e.name] ? { snippet: snippets[e.name] } : {}),
+			})),
 			...(cemDecl ? { customElementsManifest: cemDecl } : {}),
 		};
 	}

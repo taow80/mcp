@@ -337,6 +337,10 @@ export function formatComponentManifest(componentManifest: ComponentManifest): s
 				parts.push(`Story ID: ${story.id}`);
 				parts.push('');
 			}
+			if (story.tags && story.tags.length > 0) {
+				parts.push(`Tags: ${story.tags.join(', ')}`);
+				parts.push('');
+			}
 			parts.push(...formatStoryContent(story, componentManifest.import));
 			parts.push('');
 		}
@@ -491,6 +495,10 @@ export function formatStoryDocumentation(
 	// Component name - Story name header
 	parts.push(`# ${componentManifest.name} - ${story.name}`);
 	parts.push('');
+	if (story.tags && story.tags.length > 0) {
+		parts.push(`Tags: ${story.tags.join(', ')}`);
+		parts.push('');
+	}
 	parts.push(...formatStoryContent(story, componentManifest.import));
 
 	return parts.join('\n').trim();
