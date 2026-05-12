@@ -97,6 +97,7 @@ const Story = v.object({
 	id: v.optional(v.string()),
 	snippet: v.optional(v.string()),
 	summary: v.optional(v.string()),
+	tags: v.optional(v.array(v.string())),
 });
 export type Story = v.InferOutput<typeof Story>;
 
